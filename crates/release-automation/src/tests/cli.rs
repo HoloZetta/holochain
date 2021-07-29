@@ -4,7 +4,7 @@ use crate::changelog::sanitize;
 use crate::changelog::{ChangelogT, CrateChangelog, WorkspaceChangelog};
 use crate::crate_selection::ReleaseWorkspace;
 use crate::tests::workspace_mocker::{
-    example_workspace_1, example_workspace_1_aggregated_changelog,
+    example_workspace_1, example_workspace_1_aggregated_changelog, example_workspace_4,
 };
 use anyhow::Context;
 use predicates::prelude::*;
@@ -686,4 +686,45 @@ fn apply_dev_versions_works() {
     // ]);
     // let output = assert_cmd_success!(cmd);
     // println!("stderr:\n'{}'\n---\nstdout:\n'{}'\n---", output.0, output.1);
+}
+
+#[test]
+fn release_dry_run_fails_on_unallowed_conditions() {
+    let workspace_mocker = example_workspace_4().unwrap();
+    let workspace = ReleaseWorkspace::try_new(workspace_mocker.root()).unwrap();
+    workspace.git_checkout_new_branch("develop").unwrap();
+
+    let members = workspace
+        .members()
+        .unwrap()
+        .iter()
+        .map(|m| m.name())
+        .collect::<Vec<_>>();
+
+    // every member corresponds to a blocker and must thus fail separately
+    for member in members {
+        workspace_mocker.add_or_replace_file(
+            &format!("crates/{}/README.md", member),
+            indoc::indoc! {r#"
+            # Example
+
+            Some changes
+            More changes
+            "#,
+            },
+        );
+        workspace.git_add_all_and_commit("msg", None).unwrap();
+
+        let mut cmd = assert_cmd::Command::cargo_bin("release-automation").unwrap();
+        let cmd = cmd.args(&[
+            &format!("--workspace-path={}", workspace.root().display()),
+            "--log-level=debug",
+            "release",
+            &format!("--match-filter={}", member),
+            "--dry-run",
+            "--steps=BumpReleaseVersions",
+        ]);
+
+        cmd.assert().failure();
+    }
 }

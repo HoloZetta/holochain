@@ -77,6 +77,11 @@ impl<'a> Crate<'a> {
         self.package.manifest_path()
     }
 
+    /// Return a reference to the package.
+    pub(crate) fn package(&self) -> &CargoPackage {
+        &self.package
+    }
+
     pub(crate) fn state(&self) -> CrateState {
         self.workspace
             .members_states()
@@ -274,6 +279,12 @@ pub(crate) enum CrateStateFlags {
     UnreleasableViaChangelogFrontmatter,
     EnforcedVersionReqViolated,
     DisallowedVersionReqViolated,
+    /// Has no description in the Cargo.toml
+    MissingDescription,
+    /// Has no license in the Cargo.toml
+    MissingLicense,
+    /// Has a dependency that contains '*'
+    HasWildcardDependency,
 }
 
 /// Defines the meta states that can be derived from the more detailed `CrateStateFlags`.
@@ -305,11 +316,14 @@ pub(crate) struct CrateState {
 
 impl CrateState {
     pub(crate) const BLOCKING_STATES: BitFlags<CrateStateFlags> = enumflags2::make_bitflags!(
-        CrateStateFlags::{MissingChangelog |
-            MissingReadme|
-            UnreleasableViaChangelogFrontmatter |
-            DisallowedVersionReqViolated|
-            EnforcedVersionReqViolated
+        CrateStateFlags::{MissingChangelog
+            | MissingReadme
+            | UnreleasableViaChangelogFrontmatter
+            | DisallowedVersionReqViolated
+            | EnforcedVersionReqViolated
+            | MissingDescription
+            | MissingLicense
+            | HasWildcardDependency
     });
 
     pub(crate) fn new(
@@ -582,6 +596,18 @@ impl<'a> ReleaseWorkspace<'a> {
                     };
                 }
 
+                // manifest metadata validation
+                {
+                    let metadata = member.package().manifest().metadata();
+                    if !(metadata.license.is_some() || metadata.license_file.is_some()) {
+                        insert_state!(CrateStateFlags::MissingLicense);
+                    }
+
+                    if metadata.description.is_none() {
+                        insert_state!(CrateStateFlags::MissingDescription);
+                    }
+                }
+
                 // regex matching state
                 if criteria.match_filter.is_match(&member.name())? {
                     insert_state!(CrateStateFlags::Matched);
@@ -711,6 +737,11 @@ impl<'a> ReleaseWorkspace<'a> {
                             );
                         }
 
+                        for dep in member.package().dependencies() {
+                            if dep.version_req().to_string().contains("*") {
+                                insert_state!(CrateStateFlags::HasWildcardDependency);
+                            }
+                        }
                     }
 
                     // set DependencyChanged in dependants if this crate changed
