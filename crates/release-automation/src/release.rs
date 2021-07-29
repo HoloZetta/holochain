@@ -797,7 +797,7 @@ fn publish_paths_to_crates_io(
 
             let mut found = false;
 
-            for delay_secs in &[14, 28, 56] {
+            for delay_secs in &[56, 28, 14, 7, 14, 28, 56] {
                 let duration = std::time::Duration::from_secs(*delay_secs);
                 std::thread::sleep(duration);
 
